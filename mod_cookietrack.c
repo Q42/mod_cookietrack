@@ -151,11 +151,17 @@ void make_cookie(request_rec *r, char uid[], char cur_uid[], int use_dnt_expires
     /* 1024 == hardcoded constant */
     char cookiebuf[1024];
     char *new_cookie;
-    const char *rname = ap_get_remote_host(r->connection, r->per_dir_config,
-                                           REMOTE_NAME, NULL);
+    const char *unique_id;
 
-    /* XXX: hmm, this should really tie in with mod_unique_id */
-    apr_snprintf(cookiebuf, sizeof(cookiebuf), "%s", uid );
+    /* Use mod_unique_id if available */
+    if((unique_id = apr_table_get(r->subprocess_env, "UNIQUE_ID"))){
+        apr_cpystrn(cookiebuf, unique_id, sizeof(cookiebuf));
+    }
+    else {
+        const char *rname = ap_get_remote_host(r->connection, r->per_dir_config,
+                                               REMOTE_NAME, NULL);
+        apr_snprintf(cookiebuf, sizeof(cookiebuf), "%s", uid );
+    }
 
     if (dcfg->expires) {
 
