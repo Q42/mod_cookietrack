@@ -461,17 +461,9 @@ static int spot_cookie(request_rec *r)
                              "%s.%" APR_TIME_T_FMT, rname, apr_time_now() );
                 }
 
-            // it's set to something reasonable - note we're still setting
-            // a new cookie, even when there's no expires requested, because
-            // we don't know if there's an expires on the /current/ cookie.
-            // this could be added, but this seems to work for now.
+            // it's set to something reasonable, so we can skip setting a cookie
             } else {
-                // XXX we use a apr_pstrndup instead, so we can't overflow
-                // the buffer if we get sent garbage
-                // The return value is a
-                sprintf( new_cookie_value, "%s",
-                    apr_pstrndup( r->pool, cur_cookie_value, _MAX_COOKIE_LENGTH ) );
-
+                return DECLINED;
             }
 
         // it's either carbage, or not set; either way,
