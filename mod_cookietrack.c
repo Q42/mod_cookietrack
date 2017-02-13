@@ -252,11 +252,6 @@ void make_cookie(request_rec *r, char uid[], char cur_uid[], int use_dnt_expires
         apr_table_addn( r->headers_in,
                         dcfg->header_name,
                         apr_pstrdup(r->pool, uid) );
-
-        // outgoing
-        apr_table_addn( r->err_headers_out,
-                        dcfg->header_name,
-                        apr_pstrdup(r->pool, uid) );
     }
 
     // set a note, so we can capture it in the logs
