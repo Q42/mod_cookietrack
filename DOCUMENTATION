@@ -58,22 +58,6 @@ and aims to fix a lot of the issues with it. In no particular order:
   as log the UUID more easily outside Apache, without needing to parse the
   cookie header.
 
-* Do Not Track support (configurable)
-
-  mod_usertrack does not offer any support for Do Not Track (see here for
-  a definition: http://dnt.mozilla.org/) and will set cookies regardless
-  of the users Do Not Track settings.
-
-  mod_cookietrack addresses this by looking at the Do Not Track header
-  that is sent by the client and setting a "DNT" cookie with fixed expiry
-  value, making this an untrackable cookie. It still sets a cookie because
-  it is not possible to access the value of the Do Not Track header in
-  JavaScript from most browsers yet.
-
-  Note: this is the only addition that changes the behaviour compared to
-  mod_usertrack: Do Not Track will be complied with by default, you can
-  turn it off if you insist.
-
 * External UID library support
 
   mod_usertrack uses a simple 'IPAdress.TimeStamp' format for it's UUIDs,
@@ -167,67 +151,6 @@ configuration directives only.
 
 Below are the extended configuration options available in mod_cookietrack, that are
 not supported by mod_usertrack:
-
-*** CookieDNTComply directive
-    Syntax:     CookieDNTComply on|off
-    Default:    CookieDNTComply on
-
-    This directive controls whether mod_cookietrack will set a fixed string DNT
-    cookie if the "Do Not Track" header is present. If you wish to ignore the
-    "Do Not Track" header, or be completely backwards compatible with mod_usertrack,
-    set this directive to off.
-
-    Note it's considered good industry practice to comply with Do Not Track and we
-    urge you to leave this directive enabled. It's exposure is purely for backwards
-    compatibility.
-
-*** CookieDNTValue directive
-    Syntax:     CookieDNTValue String
-    Default:    CookieDNTValue DNT
-
-    This directive controls the value of the "Do Not Track" cookie. The industry
-    standard is to use "DNT", but it can be any fixed string.
-
-*** CookieDNTExempt directive
-    Syntax:     CookieDNTExempt String1 String2 ...
-    Default:    NULL
-
-    This directive lets you list some cookie values as exempt from being set
-    to 'CookieDNTValue'. This allows you to whitelist cookies like, for example,
-    'OPTOUT' to persist, even when the user sends the DNT header.
-
-    The rationale is that a more specific signal, like 'OPTOUT', shouldn't be
-    lost if the user enables and subsequently disables disables the DNT header.
-
-    Using that same rationale, any cookies listed in 'CookieDNTExempt' will also
-    not have their 'Expires' updated. In fact, no 'Set-Cookie' header will be
-    returned if the current cookie value is in the 'CookieDNTExempt' list, even
-    if the DNT header is not provided.
-
-*** CookieDNTExemptBrowsers directive
-    Syntax:     CookieDNTExemptBrowsers Regex1 Regex2 ...
-    Default:    NULL
-
-    This directive lets you list browsers whose DNT header you wish to ignore.
-    For example, if you wish to ignore DNT headers from Internet Explorer 10,
-    you could set this to 'MSIE 10.0;'.
-
-    The rationale for this is that some browser vendors are enabling the DNT
-    header by default, and are not letting the user explicitly set it. This
-    means it's programmatically not possible to determine whether the user
-    did or did not chose to enable DNT.
-
-    This flag gives you the option to either err on the site of caution, or
-    to explicitly ignore a signal that may not have been set by the user.
-
-    The Internet Explorer 10 example is very topical, as that browser is now
-    enabling DNT by default. You can read about the pros and cons of that
-    decision here:
-
-      http://www.iab.net/public_policy/InternetExplorer
-      http://www.ypolicyblog.com/policyblog/2012/10/26/dnt/
-      https://github.com/apache/httpd/commit/a381ff35fa4d50a5f7b9f64300dfd98859dee8d0
-      https://blogs.technet.com/b/microsoft_on_the_issues/archive/2012/05/31/advancing-consumer-trust-and-privacy-internet-explorer-in-windows-8.aspx
 
 *** CookieNoteName directive
     Syntax:     CookieNoteName Name
