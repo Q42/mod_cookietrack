@@ -49,19 +49,7 @@ module AP_MODULE_DECLARE_DATA cookietrack_module;
 #define NOTE_NAME   "cookie"    // default note name if you did not provide one
                                 // Backwards compatible with mod_usertrack
 #define HEADER_NAME "X-UUID"    // default header name if you did not provide one
-#define DNT_VALUE   "DNT"       // Cookie value to set when DNT is present
-#define DNT_EXPIRES "Fri, 01-Jan-38 00:00:00 GMT"
-                                // Set a fixed expires for DNT; per second expires still
-                                // allows users to be tracked based on the expires.
-#define DNT_MAX_AGE 2145916800  // unix time on Jan 1st, 2038. See:
-                                // http://www.onlineconversion.com/unix_time.htm
-                                // using 2038 as it's pre-32 bit overflow.
 
-// XXX This doesn't work because SetEnv/SetEnvIf code isn't run until APR_HOOK_MIDDLE,
-// at which point this code has already run :(
-//#define DNT_IGNORE_ENV_VAR "request_is_dnt_exempt"
-                                // If this env var is set, we consider the request to
-                                // be DNT exempt, regardless of any other settings.
 #define NUM_SUBS 3              // Amount of regex sub expressions
 
 #define GENERATED_NOTE_NAME "cookie_generated"
@@ -116,16 +104,6 @@ typedef struct {
     ap_regex_t *regexp;     // used to find cookietrack cookie in cookie header
     int expires;            // holds the expires value for the cookie
     int send_header;        // whether or not to send headers
-    char *dnt_value;        // value to use for the cookie if dnt header is present
-    int set_dnt_cookie;     // whether to set a dnt cookie if dnt header is present
-    int comply_with_dnt;    // adhere to browsers dnt settings?
-    int dnt_max_age;        // timestamp to use on the cookie when dnt is true
-    char *dnt_expires;      // timestamp to use on the cookie when dnt is true
-    apr_array_header_t *dnt_exempt;
-                            // cookie values that are DNT exempt, e.g OPTOUT
-    apr_array_header_t *dnt_exempt_browser;
-                            // browser values that are DNT exempt, e.g 'MSIE 10.0'
-
 } cookietrack_settings_rec;
 
 
@@ -143,7 +121,7 @@ void __builtin_gen_uid( char uid[], char input[] )
 }
 
 // Generate the actual cookie
-void make_cookie(request_rec *r, char uid[], char cur_uid[], int use_dnt_expires)
+void make_cookie(request_rec *r, char uid[], char cur_uid[])
 {   // configuration
     cookietrack_settings_rec *dcfg;
     dcfg = ap_get_module_config(r->per_dir_config, &cookietrack_module);
@@ -174,36 +152,16 @@ void make_cookie(request_rec *r, char uid[], char cur_uid[], int use_dnt_expires
             apr_time_exp_gmt(&tms, r->request_time
                                  + apr_time_from_sec(dcfg->expires));
 
-            // this sets a fixed expires in the future
-            if( use_dnt_expires ) {
-                new_cookie = apr_psprintf( r->pool,
-                                "%s; expires=%s", new_cookie, dcfg->dnt_expires );
-
-            // use the dynamic one
-            } else {
-                new_cookie = apr_psprintf( r->pool,
-                                "%s; expires=%s, %.2d-%s-%.2d %.2d:%.2d:%.2d GMT",
-                                new_cookie, apr_day_snames[tms.tm_wday],
-                                tms.tm_mday,
-                                apr_month_snames[tms.tm_mon],
-                                tms.tm_year % 100,
-                                tms.tm_hour, tms.tm_min, tms.tm_sec
-                             );
-            }
+            new_cookie = apr_psprintf( r->pool,
+                            "%s; expires=%s, %.2d-%s-%.2d %.2d:%.2d:%.2d GMT",
+                            new_cookie, apr_day_snames[tms.tm_wday],
+                            tms.tm_mday,
+                            apr_month_snames[tms.tm_mon],
+                            tms.tm_year % 100,
+                            tms.tm_hour, tms.tm_min, tms.tm_sec
+                            );
         } else {
-            int expires = 0;
-
-            // use a static expires date in the future
-            if( use_dnt_expires ) {
-                time_t t;
-                time( &t );
-                expires = dcfg->dnt_max_age - t;
-
-            // use the dynamic one
-            } else {
-                expires = dcfg->expires;
-            }
-
+            int expires = dcfg->expires;
             _DEBUG && fprintf( stderr, "Expires = %d\n", expires );
 
             new_cookie = apr_psprintf( r->pool,
@@ -307,81 +265,6 @@ static int spot_cookie(request_rec *r)
 
     _DEBUG && fprintf( stderr, "Current Cookie: %s\n", cur_cookie_value );
 
-    /* A cookie may be listed as DNT Exempt, at which point we don't even /touch/ it.
-     * The expires value may be set by some other process altogether and if so, the
-     * policy for mod_cookietrack may just interfere. The specific use case here is
-     * an OPTOUT cookie which may have a life span of many years, while the standard
-     * tracking cookies have a much shorter lifespan.
-     */
-    if( (dcfg->dnt_exempt->nelts > 0) && (cur_cookie_value != NULL) ) {
-        int i;
-
-        // Following tutorial code here again:
-        // http://dev.ariel-networks.com/apr/apr-tutorial/html/apr-tutorial-19.html
-        for( i = 0; i < dcfg->dnt_exempt->nelts; i++ ) {
-            char *exempt = ((char **)dcfg->dnt_exempt->elts)[i];
-            if( strcasecmp( cur_cookie_value, exempt ) == 0 ) {
-                _DEBUG && fprintf( stderr,
-                    "Exempt cookie %s - not modifying\n", cur_cookie_value );
-                return DECLINED;
-            }
-        }
-    }
-
-    /* Is DNT set?
-       It IS if the header was provided, and the value is not 0 (explicitly disabled by user)
-    */
-    const char *dnt_header_value = apr_table_get( r->headers_in, "DNT" );
-    int dnt_is_set = (dnt_header_value != NULL) && (strcasecmp(dnt_header_value, "0") != 0) ? 1 : 0;
-
-    _DEBUG && fprintf( stderr, "DNT: %s - DNT Enabled: %d\n", dnt_header_value, dnt_is_set );
-
-    // XXX This doesn't work because SetEnv/SetEnvIf code isn't run until APR_HOOK_MIDDLE,
-    // at which point this code has already run :(
-    // Are you asking us to ignore DNT on this request?
-    // char *dnt_ignored_this_request;
-    // if( apr_env_get( &dnt_ignored_this_request, DNT_IGNORE_ENV_VAR, r->pool ) != APR_SUCCESS ) {
-    //     _DEBUG && fprintf( stderr, "Env var %s not set\n", DNT_IGNORE_ENV_VAR );
-    // } else {
-    //     _DEBUG && fprintf( stderr, "Request is DNT exempt: %s\n", dnt_ignored_this_request );
-    // }
-
-    // You may have chosen to ignore this browsers DNT settings
-    int request_is_dnt_exempt = 0;
-
-    // Only bother checking if DNT was set to begin with and we have a list
-    // of browser regexes to filter against.
-    if( (dcfg->dnt_exempt_browser->nelts > 0) && dnt_is_set ) {
-
-        char *ua = NULL;
-        if( (ua = apr_pstrdup( r->pool, apr_table_get( r->headers_in, "User-Agent" )) ) ) {
-
-            // We check if the UA matches any of the regexes set
-            // Following tutorial code here again:
-            // http://dev.ariel-networks.com/apr/apr-tutorial/html/apr-tutorial-19.html
-            int i;
-            for( i = 0; i < dcfg->dnt_exempt_browser->nelts; i++ ) {
-                _DEBUG && fprintf( stderr, "exempt browser index: %d\n", i );
-
-                char *exempt = ((char **)dcfg->dnt_exempt_browser->elts)[i];
-                _DEBUG && fprintf( stderr, "exempt browser regex: %s\n", exempt );
-
-                // compile the regex - XXX do we need those flags?
-                ap_regex_t *preg = ap_pregcomp( r->pool, exempt, (AP_REG_EXTENDED | AP_REG_NOSUB ) );
-
-                // make sure we got a valid regex - XXX do this at compile time?
-                ap_assert(preg != NULL);
-
-                // ap_regexec returns 0 if there was a match
-                if( !ap_regexec( preg, ua, 0, NULL, 0 ) ) {
-                    _DEBUG && fprintf( stderr, "DNT Exempt: UA %s matches %s\n", ua, exempt );
-                    request_is_dnt_exempt = 1;
-                    break;
-                }
-            }
-        }
-    }
-
     /* XFF support inspired by this patch:
        http://www.mail-archive.com/dev@httpd.apache.org/msg17378.html
 
@@ -430,63 +313,24 @@ static int spot_cookie(request_rec *r)
 
     _DEBUG && fprintf( stderr, "Maximum supported cookie length: %d\n", _MAX_COOKIE_LENGTH );
 
-    // dnt is set, and we care about that and this request is NOT explicitly exempt
-    if( dnt_is_set && dcfg->comply_with_dnt && !request_is_dnt_exempt ) {
+    // there already is a cookie set
+    if( cur_cookie_value ) {
+        return DECLINED;
 
-        // you don't want us to set a cookie, alright then our work is done.
-        if( !dcfg->set_dnt_cookie ) {
-            return DECLINED;
-        }
-
-        // If we got here, your cookie is not in the dnt_exempt list (as we
-        // check that further up). So at this point, just go straight to
-        // setting it to the dnt value
-        // dnt_value is a pointer, hence the sprintf
-
-        sprintf( new_cookie_value, "%s", dcfg->dnt_value );
-
-    // No DNT header, so we need a cookie value to set
+    // it's either carbage, or not set; either way,
+    // we need to generate a new one
     } else {
+        // if we have some sort of library that's generating the
+        // UID, call that with the cookie we would be setting
+        if( _EXTERNAL_UID_FUNCTION ) {
+            char ts[ _MAX_COOKIE_LENGTH ];
+            sprintf( ts, "%" APR_TIME_T_FMT, apr_time_now() );
+            gen_uid( new_cookie_value, ts, rname );
 
-        // there already is a cookie set
-        if( cur_cookie_value ) {
-
-            // but it's set to the DNT cookie
-            if( strcasecmp( cur_cookie_value, dcfg->dnt_value ) == 0 ) {
-
-                // if we have some sort of library that's generating the
-                // UID, call that with the cookie we would be setting
-                if( _EXTERNAL_UID_FUNCTION ) {
-                    char ts[ _MAX_COOKIE_LENGTH ];
-                    sprintf( ts, "%" APR_TIME_T_FMT, apr_time_now() );
-                    gen_uid( new_cookie_value, ts, rname );
-
-                // otherwise, just set it
-                } else {
-                    sprintf( new_cookie_value,
-                             "%s.%" APR_TIME_T_FMT, rname, apr_time_now() );
-                }
-
-            // it's set to something reasonable, so we can skip setting a cookie
-            } else {
-                return DECLINED;
-            }
-
-        // it's either carbage, or not set; either way,
-        // we need to generate a new one
+        // otherwise, just set it
         } else {
-            // if we have some sort of library that's generating the
-            // UID, call that with the cookie we would be setting
-            if( _EXTERNAL_UID_FUNCTION ) {
-                char ts[ _MAX_COOKIE_LENGTH ];
-                sprintf( ts, "%" APR_TIME_T_FMT, apr_time_now() );
-                gen_uid( new_cookie_value, ts, rname );
-
-            // otherwise, just set it
-            } else {
-                sprintf( new_cookie_value,
-                         "%s.%" APR_TIME_T_FMT, rname, apr_time_now() );
-            }
+            sprintf( new_cookie_value,
+                        "%s.%" APR_TIME_T_FMT, rname, apr_time_now() );
         }
     }
 
@@ -495,11 +339,7 @@ static int spot_cookie(request_rec *r)
     /* Set the cookie in a note, for logging */
     apr_table_setn(r->notes, dcfg->note_name, new_cookie_value);
 
-    make_cookie(r,  new_cookie_value,
-                    cur_cookie_value,
-                    // should we use dnt expires?
-                    (dnt_is_set && dcfg->comply_with_dnt && !request_is_dnt_exempt)
-                );
+    make_cookie(r,  new_cookie_value, cur_cookie_value);
 
     // We need to flush the stream for messages to appear right away.
     // Performing an fflush() in a production system is not good for
@@ -650,13 +490,6 @@ static void *make_cookietrack_settings(apr_pool_t *p, char *d)
     dcfg->generated_note_name   = GENERATED_NOTE_NAME;
     dcfg->header_name           = HEADER_NAME;
     dcfg->send_header           = 0;
-    dcfg->dnt_value             = DNT_VALUE;
-    dcfg->set_dnt_cookie        = 1;
-    dcfg->comply_with_dnt       = 1;
-    dcfg->dnt_expires           = DNT_EXPIRES;
-    dcfg->dnt_max_age           = DNT_MAX_AGE;
-    dcfg->dnt_exempt            = apr_array_make(p, 2, sizeof(const char*) );
-    dcfg->dnt_exempt_browser    = apr_array_make(p, 2, sizeof(const char*) );
 
     /* In case the user does not use the CookieName directive,
      * we need to compile the regexp for the default cookie name. */
@@ -690,12 +523,6 @@ static const char *set_config_enable(cmd_parms *cmd, void *mconfig,
 
     } else if( strcasecmp(name, "CookieSendHeader") == 0 ) {
         dcfg->send_header       = value;
-
-    } else if( strcasecmp(name, "CookieSetDNTCookie") == 0 ) {
-        dcfg->set_dnt_cookie    = value;
-
-    } else if( strcasecmp(name, "CookieDNTComply") == 0 ) {
-        dcfg->comply_with_dnt   = value;
 
     } else {
         return apr_psprintf(cmd->pool, "No such variable %s", name);
@@ -743,10 +570,6 @@ static const char *set_config_value(cmd_parms *cmd, void *mconfig,
     } else if( strcasecmp(name, "CookieGeneratedNoteName") == 0 ) {
         dcfg->generated_note_name
                             = apr_pstrdup(cmd->pool, value);
-
-    /* Value to use if setting a DNT cookie */
-    } else if( strcasecmp(name, "CookieDNTValue") == 0 ) {
-        dcfg->dnt_value     = apr_pstrdup(cmd->pool, value);
 
     /* Cookie style to sue */
     } else if( strcasecmp(name, "CookieStyle") == 0 ) {
@@ -798,31 +621,6 @@ static const char *set_config_value(cmd_parms *cmd, void *mconfig,
             return apr_psprintf(cmd->pool, "Invalid cookie name: %s", value);
         }
 
-    } else if( strcasecmp(name, "CookieDNTExempt") == 0 ) {
-
-        // following tutorial here:
-        // http://dev.ariel-networks.com/apr/apr-tutorial/html/apr-tutorial-19.html
-        const char *str                                 = apr_pstrdup(cmd->pool, value);
-        *(const char**)apr_array_push(dcfg->dnt_exempt) = str;
-
-        _DEBUG && fprintf( stderr, "dnt exempt = %s\n", str );
-
-        char *ary = apr_array_pstrcat( cmd->pool, dcfg->dnt_exempt, '-' );
-        _DEBUG && fprintf( stderr, "dnt exempt as str = %s\n", ary );
-
-    } else if( strcasecmp(name, "CookieDNTExemptBrowsers") == 0 ) {
-
-        // following tutorial here:
-        // http://dev.ariel-networks.com/apr/apr-tutorial/html/apr-tutorial-19.html
-        const char *str                                 = apr_pstrdup(cmd->pool, value);
-        *(const char**)apr_array_push(dcfg->dnt_exempt_browser) = str;
-
-        _DEBUG && fprintf( stderr, "dnt exempt browser = %s\n", str );
-
-        char *ary = apr_array_pstrcat( cmd->pool, dcfg->dnt_exempt_browser, '-' );
-        _DEBUG && fprintf( stderr, "dnt exempt browser as str = %s\n", ary );
-
-
     } else {
         return apr_psprintf(cmd->pool, "No such variable %s", name);
     }
@@ -858,16 +656,6 @@ static const command_rec cookietrack_cmds[] = {
                   "name of the note to set to for the Apache logs"),
     AP_INIT_TAKE1("CookieGeneratedNoteName",set_config_value,   NULL, OR_FILEINFO,
                   "name of the note indicating a cookie was generated this request" ),
-    AP_INIT_TAKE1("CookieDNTValue",         set_config_value,   NULL, OR_FILEINFO,
-                  "value to use when setting a DNT cookie"),
-    AP_INIT_FLAG( "CookieSetDNTCookie", set_config_enable,  NULL, OR_FILEINFO,
-                  "whether or not to set a DNT cookie if the DNT header is present"),
-    AP_INIT_FLAG( "CookieDNTComply",    set_config_enable,  NULL, OR_FILEINFO,
-                  "whether or not to comply with browser Do Not Track settings"),
-    AP_INIT_ITERATE( "CookieDNTExempt", set_config_value,   NULL, OR_FILEINFO,
-                  "list of cookie values that will not be changed to DNT" ),
-    AP_INIT_ITERATE( "CookieDNTExemptBrowsers", set_config_value,   NULL, OR_FILEINFO,
-                  "list regular expressions of browsers whose DNT setting will be ignored" ),
     {NULL}
 };
 
