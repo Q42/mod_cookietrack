@@ -129,17 +129,10 @@ void make_cookie(request_rec *r, char uid[], char cur_uid[])
     /* 1024 == hardcoded constant */
     char cookiebuf[1024];
     char *new_cookie;
-    const char *unique_id;
 
-    /* Use mod_unique_id if available */
-    if((unique_id = apr_table_get(r->subprocess_env, "UNIQUE_ID"))){
-        apr_cpystrn(cookiebuf, unique_id, sizeof(cookiebuf));
-    }
-    else {
-        const char *rname = ap_get_remote_host(r->connection, r->per_dir_config,
-                                               REMOTE_NAME, NULL);
-        apr_snprintf(cookiebuf, sizeof(cookiebuf), "%s", uid );
-    }
+    const char *rname = ap_get_remote_host(r->connection, r->per_dir_config,
+                                            REMOTE_NAME, NULL);
+    apr_snprintf(cookiebuf, sizeof(cookiebuf), "%s", uid );
 
     if (dcfg->expires) {
 
@@ -209,14 +202,6 @@ void make_cookie(request_rec *r, char uid[], char cur_uid[])
     // set a note indicating we generated a cookie
     // apr_table_setn wants a char, not an int, so we do the conversion like this
     apr_table_setn( r->notes, dcfg->generated_note_name, cur_uid ? "0" : "1" );
-
-    // Set headers? We set both incoming AND outgoing:
-    if( dcfg->send_header ) {
-        // incoming
-        apr_table_addn( r->headers_in,
-                        dcfg->header_name,
-                        apr_pstrdup(r->pool, uid) );
-    }
 
     // set a note, so we can capture it in the logs
     // this expects chars, and apr_pstrdup will make sure any char stays
@@ -313,13 +298,10 @@ static int spot_cookie(request_rec *r)
 
     _DEBUG && fprintf( stderr, "Maximum supported cookie length: %d\n", _MAX_COOKIE_LENGTH );
 
-    // there already is a cookie set
-    if( cur_cookie_value ) {
-        return DECLINED;
-
     // it's either carbage, or not set; either way,
     // we need to generate a new one
-    } else {
+    const char *unique_id;
+    if( !cur_cookie_value ) {
         // if we have some sort of library that's generating the
         // UID, call that with the cookie we would be setting
         if( _EXTERNAL_UID_FUNCTION ) {
@@ -327,14 +309,36 @@ static int spot_cookie(request_rec *r)
             sprintf( ts, "%" APR_TIME_T_FMT, apr_time_now() );
             gen_uid( new_cookie_value, ts, rname );
 
+        // Use mod_unique_id if available
+        } else if((unique_id = apr_table_get(r->subprocess_env, "UNIQUE_ID"))) {
+            apr_cpystrn(new_cookie_value, unique_id, sizeof(new_cookie_value));
+
         // otherwise, just set it
         } else {
             sprintf( new_cookie_value,
                         "%s.%" APR_TIME_T_FMT, rname, apr_time_now() );
         }
+
+        _DEBUG && fprintf( stderr, "New cookie: %s\n", new_cookie_value );
     }
 
-    _DEBUG && fprintf( stderr, "New cookie: %s\n", new_cookie_value );
+    // Set incoming headers?
+    if( dcfg->send_header ) {
+        if( cur_cookie_value ) {
+            apr_table_addn( r->headers_in,
+                            dcfg->header_name,
+                            apr_pstrdup(r->pool, cur_cookie_value) );
+        } else {
+            apr_table_addn( r->headers_in,
+                            dcfg->header_name,
+                            apr_pstrdup(r->pool, new_cookie_value) );
+        }
+    }
+
+    // there already is a cookie set
+    if( cur_cookie_value ) {
+        return DECLINED;
+    }
 
     /* Set the cookie in a note, for logging */
     apr_table_setn(r->notes, dcfg->note_name, new_cookie_value);
