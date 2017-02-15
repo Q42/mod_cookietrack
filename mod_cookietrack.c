@@ -67,20 +67,6 @@ module AP_MODULE_DECLARE_DATA cookietrack_module;
 #define _DEBUG 0
 #endif
 
-#ifdef LIBRARY
-// because #include doesn't support macro expansion, we use a fixed
-// header file, which the build scripts writes the dynamic header file
-// name too. Yes, hackish, but the easiest way while not using autoconf.
-#include "mod_cookietrack_external_uid.h"
-#define _EXTERNAL_UID_FUNCTION 1
-#else
-// Inlining the code now, as it's straight forward, but this would
-// work for aliasing ( see http://xrl.us/AliasC ):
-// void __builtin_gen_uid( char *uid, char *ptr );
-// void gen_uid() __attribute__((alias("__builtin_gen_uid")));
-#define _EXTERNAL_UID_FUNCTION 0
-#endif
-
 // the type of cookie to set
 typedef enum {
     CT_UNSET,       // falls back to netscape
@@ -113,12 +99,6 @@ typedef struct {
     setting cookies
 
    ******************************************** */
-
-// Generate a unique ID -
-void __builtin_gen_uid( char uid[], char input[] )
-{
-
-}
 
 // Generate the actual cookie
 void make_cookie(request_rec *r, char uid[], char cur_uid[])
@@ -302,15 +282,8 @@ static int spot_cookie(request_rec *r)
     // we need to generate a new one
     const char *unique_id;
     if( !cur_cookie_value ) {
-        // if we have some sort of library that's generating the
-        // UID, call that with the cookie we would be setting
-        if( _EXTERNAL_UID_FUNCTION ) {
-            char ts[ _MAX_COOKIE_LENGTH ];
-            sprintf( ts, "%" APR_TIME_T_FMT, apr_time_now() );
-            gen_uid( new_cookie_value, ts, rname );
-
         // Use mod_unique_id if available
-        } else if((unique_id = apr_table_get(r->subprocess_env, "UNIQUE_ID"))) {
+        if((unique_id = apr_table_get(r->subprocess_env, "UNIQUE_ID"))) {
             apr_cpystrn(new_cookie_value, unique_id, sizeof(new_cookie_value));
 
         // otherwise, just set it
