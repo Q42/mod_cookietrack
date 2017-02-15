@@ -308,9 +308,9 @@ static int spot_cookie(request_rec *r)
         }
     }
 
-    // there already is a cookie set
+    // there already is a cookie present, so we can skip setting a new cookie
     if( cur_cookie_value ) {
-        return DECLINED;
+        return OK;
     }
 
     /* Set the cookie in a note, for logging */
