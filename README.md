@@ -7,6 +7,9 @@ redirects and much much more.
 Building
 --------
 
+Unix
+----
+
 Make sure you have apxs2 and perl installed, which on Ubuntu
 you can get by running:
 
@@ -22,6 +25,18 @@ From the checkout directory run:
 
 This will build, install & enable the module on your system
 
+Windows
+-------
+
+Make sure you have a 32-bits version of Apache installed to your 
+`Program Files (x86)`-directory and have included `Build Headers and Libraries`
+during the installation.
+
+Then open `mod_cookietrack.sln` and press `Build`. This should build the module
+to `Release\mod_cookietrack.so`.
+
+For troubleshooting, see this blogpost:
+https://www.calazan.com/how-to-compile-and-build-apache-modules-on-windows-using-visual-studio/
 
 Configuration
 -------------
@@ -30,28 +45,6 @@ See the file 'DOCUMENTATION' in the same directory as this
 README for all the extra features this module has compared to
 mod_usertrack, as well as documentation on the configuration
 directives supported.
-
-
-Custom UID generation
----------------------
-
-Create a C file or library that has a 'gen_uid' function with
-the following prototype:
-
-```
-  void gen_uid( char *uid, char *timestamp, char *ip );
-```
-
-Where 'timestamp' is a 16 character microtime, 'ip' is the
-remote IP address and 'uid' is a char pointer for you to store
-the UID to use for this request.
-
-And then, build the module like this (any gcc linking target
-is acceptable):
-
-```
-  $ sudo perl build.pl --inc /where/my_uid/lives --lib my_uid.c
-```
 
 Testing
 -------
