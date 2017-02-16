@@ -32,8 +32,14 @@ Make sure you have a 32-bits version of Apache installed to your
 `Program Files (x86)`-directory and have included `Build Headers and Libraries`
 during the installation.
 
-Then open `mod_cookietrack.sln` and press `Build`. This should build the module
-to `Release\mod_cookietrack.so`.
+Then open `mod_cookietrack.sln` in Visual Studio and press `Build`. This should
+build the module to `Release\mod_cookietrack.so`.
+
+When copying/installing the module in Apache, make sure that you have installed
+the Visual C++ Redistributable for the version of Visual Studio with which the
+module was built, otherwise Apache will fail to load it. E.g. if you've built
+the module with VS2015 then install the VC++ Redistributable for VS2015:
+https://www.microsoft.com/en-us/download/details.aspx?id=48145
 
 For troubleshooting, see this blogpost:
 https://www.calazan.com/how-to-compile-and-build-apache-modules-on-windows-using-visual-studio/
